@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Penthouse Entry System</title>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #131a32;
+      --panel-2: #1a2243;
+      --text: #e6ecff;
+      --muted: #8b95b8;
+      --accent: #5b8cff;
+      --good: #21c177;
+      --bad: #ff4d6d;
+      --warn: #ffb020;
+      --border: #232c54;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; height: 100vh; overflow: hidden; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 14px 22px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: 0.2px; }
+    header .badge { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); color: var(--muted); margin-left: 10px; }
+    main { display: grid; grid-template-columns: 1fr 360px; gap: 0; min-height: 0; }
+    .stage { position: relative; display: grid; grid-template-rows: auto 1fr; min-height: 0; background: #000; }
+    .banner { padding: 22px 28px; text-align: center; font-size: 28px; font-weight: 600; transition: background 0.3s; background: var(--panel); border-bottom: 1px solid var(--border); }
+    .banner.idle { color: var(--muted); }
+    .banner.match { background: rgba(33,193,119,0.18); color: var(--good); }
+    .banner.nomatch { background: rgba(255,77,109,0.20); color: var(--bad); }
+    .banner.unknown { background: rgba(255,176,32,0.16); color: var(--warn); }
+    .video-wrap { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    #overlay { position: absolute; inset: 0; pointer-events: none; }
+    .matched-photo { position: absolute; right: 24px; top: 24px; width: 160px; height: 200px; border-radius: 14px; object-fit: cover; border: 4px solid var(--good); box-shadow: 0 10px 40px rgba(0,0,0,0.5); display: none; background: var(--panel-2); }
+    .matched-photo.show { display: block; }
+    aside { background: var(--panel); border-left: 1px solid var(--border); display: grid; grid-template-rows: auto auto auto 1fr auto; min-height: 0; }
+    .section { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .section h2 { margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button, .btn { background: var(--accent); color: white; border: none; padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    label.file-label { display: inline-block; }
+    input[type=file] { display: none; }
+    .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+    .stat .k { color: var(--muted); }
+    .slider-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+    .slider-row label { font-size: 12px; color: var(--muted); }
+    input[type=range] { width: 100%; }
+    .log { overflow: auto; min-height: 0; padding: 0 18px 14px; font-size: 12px; }
+    .log-entry { padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; background: var(--panel-2); display: grid; grid-template-columns: 1fr auto; gap: 4px; border-left: 3px solid var(--border); }
+    .log-entry.match { border-left-color: var(--good); }
+    .log-entry.nomatch { border-left-color: var(--bad); }
+    .log-entry .name { font-weight: 600; }
+    .log-entry .time { color: var(--muted); font-size: 11px; }
+    .log-entry .meta { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+    .footer-actions { padding: 14px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+    .footer-actions button { flex: 1; }
+    .roster { max-height: 140px; overflow: auto; }
+    .roster-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+    .roster-item img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--panel-2); }
+    .empty { color: var(--muted); font-size: 12px; padding: 6px 0; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel-2); color: var(--text); padding: 10px 18px; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); display: none; border: 1px solid var(--border); }
+    .toast.show { display: block; }
+    .pulse { animation: pulse 0.5s ease-in-out 4; }
+    @keyframes pulse { 0%, 100% { background: rgba(255,77,109,0.20); } 50% { background: rgba(255,77,109,0.40); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display:flex; align-items:center;">
+      <h1>The Penthouse Entry System</h1>
+      <span class="badge" id="status-badge">Loading …</span>
+    </div>
+    <div class="row">
+      <span id="member-count" class="badge">0 Members</span>
+      <button id="start-btn" class="secondary" disabled>Start Camera</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage">
+      <div id="banner" class="banner idle">Entry Recognition System</div>
+      <div class="video-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        <img id="matched-photo" class="matched-photo" alt="" />
+      </div>
+    </section>
+
+    <aside>
+      <div class="section">
+        <h2>Members</h2>
+        <div class="row">
+          <label class="file-label">
+            <input type="file" id="member-input" webkitdirectory directory multiple accept="image/*" />
+            <span class="btn">Load Database</span>
+          </label>
+          <label class="file-label">
+            <input type="file" id="member-files" multiple accept="image/*" />
+            <span class="btn secondary">Add Photos</span>
+          </label>
+          <button id="clear-members" class="secondary">Clear</button>
+        </div>
+        <div class="roster" id="roster"><div class="empty">No Members Loaded</div></div>
+      </div>
+
+      <div class="section">
+        <h2>Settings</h2>
+        <div class="slider-row">
+          <label for="threshold">Match Threshold</label>
+          <span id="threshold-val">0.50</span>
+        </div>
+        <input type="range" id="threshold" min="0.30" max="0.80" step="0.01" value="0.50" />
+        <div class="slider-row" style="margin-top:8px;">
+          <label for="dedup">Duplicate Window (s)</label>
+          <span id="dedup-val">30</span>
+        </div>
+        <input type="range" id="dedup" min="5" max="120" step="5" value="30" />
+        <div class="row" style="margin-top:10px;">
+          <label style="font-size:12px;color:var(--muted);"><input type="checkbox" id="alert-sound" checked /> Alert Tone </label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Live Log</h2>
+        <div class="row">
+          <button id="export-log" class="secondary">Export CSV</button>
+          <button id="clear-log" class="secondary">Clear log</button>
+        </div>
+      </div>
+      <div class="log" id="log"><div class="empty">No Check-In's Yet</div></div>
+
+      <div class="footer-actions">
+        <button id="recompute" class="secondary" title="Re-detect descriptors for loaded photos">Detect Face</button>
+      </div>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const banner = document.getElementById('banner');
+  const matchedPhoto = document.getElementById('matched-photo');
+  const memberCountEl = document.getElementById('member-count');
+  const rosterEl = document.getElementById('roster');
+  const logEl = document.getElementById('log');
+  const startBtn = document.getElementById('start-btn');
+  const statusBadge = document.getElementById('status-badge');
+  const thresholdEl = document.getElementById('threshold');
+  const thresholdVal = document.getElementById('threshold-val');
+  const dedupEl = document.getElementById('dedup');
+  const dedupVal = document.getElementById('dedup-val');
+  const alertSoundEl = document.getElementById('alert-sound');
+  const toast = document.getElementById('toast');
+
+  /** state */
+  const state = {
+    members: [],          // {name, descriptor: Float32Array, photoUrl, file}
+    log: [],              // {ts, name, status, distance}
+    lastSeen: new Map(),  // key -> ts
+    running: false,
+    modelsLoaded: false,
+    videoReady: false,
+    bannerTimer: null,
+    audioCtx: null
+  };
+
+  function showToast(msg, ms = 2500) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toast.classList.remove('show'), ms);
+  }
+
+  function setBanner(text, kind) {
+    banner.textContent = text;
+    banner.className = 'banner ' + kind;
+    if (kind === 'nomatch') banner.classList.add('pulse');
+    if (state.bannerTimer) clearTimeout(state.bannerTimer);
+    if (kind !== 'idle') {
+      state.bannerTimer = setTimeout(() => {
+        banner.textContent = state.members.length ? 'Watching for members…' : 'Load member photos to begin';
+        banner.className = 'banner idle';
+        matchedPhoto.classList.remove('show');
+      }, 4500);
+    }
+  }
+
+  function nameFromFile(file) {
+    let n = file.name.replace(/\.[^.]+$/, '');
+    n = n.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return n.replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  async function loadModels() {
+    statusBadge.textContent = 'Loading models…';
+    try {
+      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+      state.modelsLoaded = true;
+      statusBadge.textContent = 'Models ready';
+      startBtn.disabled = false;
+    } catch (e) {
+      statusBadge.textContent = 'Model load failed';
+      showToast('Failed to load face models. Check internet connection.', 5000);
+      console.error(e);
+    }
+  }
+
+  async function processMemberFile(file) {
+    const img = await faceapi.bufferToImage(file);
+    const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+    if (!det) return null;
+    return {
+      name: nameFromFile(file),
+      descriptor: det.descriptor,
+      photoUrl: URL.createObjectURL(file),
+      file
+    };
+  }
+
+  async function ingestFiles(fileList) {
+    if (!state.modelsLoaded) { showToast('Models still loading…'); return; }
+    const files = Array.from(fileList).filter(f => /\.(jpe?g|png|webp|bmp)$/i.test(f.name));
+    if (!files.length) { showToast('No image files found'); return; }
+    statusBadge.textContent = `Indexing 0/${files.length}…`;
+    let added = 0, skipped = 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const m = await processMemberFile(files[i]);
+        if (m) { state.members.push(m); added++; } else { skipped++; }
+      } catch (e) {
+        skipped++;
+        console.warn('Failed on', files[i].name, e);
+      }
+      statusBadge.textContent = `Indexing ${i+1}/${files.length}…`;
+    }
+    statusBadge.textContent = state.modelsLoaded ? 'Models ready' : 'Loading models…';
+    renderRoster();
+    showToast(`Added ${added} member${added!==1?'s':''}${skipped?` (${skipped} had no detectable face)`:''}`);
+    if (state.members.length && !state.running) setBanner('Press Start Camera to begin', 'idle');
+  }
+
+  function renderRoster() {
+    memberCountEl.textContent = `${state.members.length} member${state.members.length!==1?'s':''}`;
+    if (!state.members.length) {
+      rosterEl.innerHTML = '<div class="empty">No members loaded</div>';
+      return;
+    }
+    rosterEl.innerHTML = state.members.map(m =>
+      `<div class="roster-item"><img src="${m.photoUrl}" alt=""><span>${escapeHtml(m.name)}</span></div>`
+    ).join('');
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function startCamera() {
+    if (state.running) return;
+    if (!state.members.length) { showToast('Load member photos first'); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      video.srcObject = stream;
+      await new Promise(r => video.onloadedmetadata = r);
+      await video.play();
+      state.videoReady = true;
+      sizeOverlay();
+      window.addEventListener('resize', sizeOverlay);
+      state.running = true;
+      startBtn.textContent = 'Stop Camera';
+      setBanner('Watching for members…', 'idle');
+      detectLoop();
+    } catch (e) {
+      console.error(e);
+      showToast('Could not access camera: ' + e.message, 4000);
+    }
+  }
+
+  function stopCamera() {
+    state.running = false;
+    startBtn.textContent = 'Start Camera';
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+  }
+
+  function sizeOverlay() {
+    overlay.width = video.clientWidth;
+    overlay.height = video.clientHeight;
+  }
+
+  function findMatch(descriptor) {
+    const threshold = parseFloat(thresholdEl.value);
+    let best = { distance: Infinity, member: null };
+    for (const m of state.members) {
+      const d = faceapi.euclideanDistance(descriptor, m.descriptor);
+      if (d < best.distance) best = { distance: d, member: m };
+    }
+    return { ...best, threshold, isMatch: best.distance < threshold };
+  }
+
+  function shouldDedupe(key) {
+    const window = parseInt(dedupEl.value) * 1000;
+    const last = state.lastSeen.get(key);
+    const now = Date.now();
+    if (last && now - last < window) return true;
+    state.lastSeen.set(key, now);
+    return false;
+  }
+
+  function logEvent(entry) {
+    state.log.unshift(entry);
+    if (state.log.length > 500) state.log.length = 500;
+    renderLog();
+  }
+
+  function renderLog() {
+    if (!state.log.length) {
+      logEl.innerHTML = '<div class="empty">No check-ins yet</div>';
+      return;
+    }
+    logEl.innerHTML = state.log.slice(0, 100).map(e => {
+      const t = new Date(e.ts).toLocaleTimeString();
+      const cls = e.status === 'match' ? 'match' : 'nomatch';
+      return `<div class="log-entry ${cls}">
+        <span class="name">${escapeHtml(e.name)}</span>
+        <span class="time">${t}</span>
+        <span class="meta">${e.status === 'match' ? `match · distance ${e.distance.toFixed(3)}` : `no match · closest ${e.closest||'—'} (${e.distance.toFixed(3)})`}</span>
+      </div>`;
+    }).join('');
+  }
+
+  function playAlert() {
+    if (!alertSoundEl.checked) return;
+    if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = state.audioCtx;
+    const now = ctx.currentTime;
+    [0, 0.18].forEach(offset => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      osc.type = 'square';
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.15, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.15);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.16);
+    });
+  }
+
+  function drawDetections(detections) {
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    const scaleX = overlay.width / video.videoWidth;
+    const scaleY = overlay.height / video.videoHeight;
+    for (const det of detections) {
+      const box = det.detection.box;
+      // mirror horizontally to match the flipped video
+      const x = overlay.width - (box.x + box.width) * scaleX;
+      const y = box.y * scaleY;
+      const w = box.width * scaleX;
+      const h = box.height * scaleY;
+      const result = findMatch(det.descriptor);
+      const color = result.isMatch ? '#21c177' : '#ff4d6d';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = color;
+      ctx.strokeRect(x, y, w, h);
+      const label = result.isMatch ? `${result.member.name}  ${result.distance.toFixed(2)}` : `Unknown  ${result.distance.toFixed(2)}`;
+      ctx.font = '600 14px system-ui, sans-serif';
+      const padding = 6;
+      const tw = ctx.measureText(label).width + padding * 2;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y - 24, tw, 22);
+      ctx.fillStyle = 'white';
+      ctx.fillText(label, x + padding, y - 8);
+    }
+  }
+
+  let detecting = false;
+  async function detectLoop() {
+    if (!state.running) return;
+    if (!detecting) {
+      detecting = true;
+      try {
+        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+        drawDetections(detections);
+        for (const det of detections) {
+          const result = findMatch(det.descriptor);
+          if (result.isMatch) {
+            const key = 'm:' + result.member.name;
+            if (!shouldDedupe(key)) {
+              setBanner(`Welcome, ${result.member.name}`, 'match');
+              matchedPhoto.src = result.member.photoUrl;
+              matchedPhoto.classList.add('show');
+              logEvent({ ts: Date.now(), name: result.member.name, status: 'match', distance: result.distance });
+            }
+          } else {
+            // dedupe by approximate descriptor signature so we don't spam
+            const sig = 'u:' + Array.from(det.descriptor.slice(0, 8)).map(v => v.toFixed(2)).join(',');
+            if (!shouldDedupe(sig)) {
+              setBanner('Not a member — Staff Alerted', 'nomatch');
+              matchedPhoto.classList.remove('show');
+              playAlert();
+              logEvent({
+                ts: Date.now(),
+                name: 'Unknown',
+                status: 'nomatch',
+                distance: result.distance,
+                closest: result.member ? result.member.name : '—'
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        detecting = false;
+      }
+    }
+    requestAnimationFrame(detectLoop);
+  }
+
+  function exportCsv() {
+    if (!state.log.length) { showToast('Log is empty'); return; }
+    const rows = [['timestamp_iso', 'timestamp_local', 'name', 'status', 'distance', 'closest_member']];
+    for (const e of state.log) {
+      rows.push([
+        new Date(e.ts).toISOString(),
+        new Date(e.ts).toLocaleString(),
+        e.name,
+        e.status,
+        e.distance.toFixed(4),
+        e.closest || ''
+      ]);
+    }
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `penthouse-entry-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** events */
+  document.getElementById('member-input').addEventListener('change', e => ingestFiles(e.target.files));
+  document.getElementById('member-files').addEventListener('change', e => ingestFiles(e.target.files));
+  document.getElementById('clear-members').addEventListener('click', () => {
+    state.members.forEach(m => URL.revokeObjectURL(m.photoUrl));
+    state.members = [];
+    renderRoster();
+  });
+  document.getElementById('clear-log').addEventListener('click', () => { state.log = []; renderLog(); });
+  document.getElementById('export-log').addEventListener('click', exportCsv);
+  document.getElementById('recompute').addEventListener('click', async () => {
+    if (!state.members.length) return;
+    const files = state.members.map(m => m.file);
+    state.members.forEach(m => URL.revokeObjectURL(m.photoUrl));
+    state.members = [];
+    renderRoster();
+    await ingestFiles(files);
+  });
+  startBtn.addEventListener('click', () => state.running ? stopCamera() : startCamera());
+  thresholdEl.addEventListener('input', () => thresholdVal.textContent = parseFloat(thresholdEl.value).toFixed(2));
+  dedupEl.addEventListener('input', () => dedupVal.textContent = dedupEl.value);
+
+  /** init */
+  loadModels();
+})();
+</script>
+</body>
+</html>
